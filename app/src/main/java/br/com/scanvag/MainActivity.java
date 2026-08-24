@@ -21,6 +21,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -29,6 +30,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
+import java.util.Locale;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -52,7 +54,7 @@ public class MainActivity extends Activity {
             new VagModule("09", "BCM / Central Eletrica", "70E", "778"),
             new VagModule("17", "Painel / Instruments", "714", "77E"),
             new VagModule("19", "Gateway", "710", "77A"),
-            new VagModule("5F", "Multimidia", "773", "7DD")
+            new VagModule("5F", "Multimidia", "773", "7DD", true)
     };
 
     private BluetoothAdapter bluetoothAdapter;
@@ -87,13 +89,13 @@ public class MainActivity extends Activity {
                 ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
 
         TextView title = new TextView(this);
-        title.setText("ScanVAG v1.1");
+        title.setText("ScanVAG v1.2");
         title.setTextSize(27);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         root.addView(title, fullWidth());
 
         TextView badge = new TextView(this);
-        badge.setText("READ ONLY • ELM327 • VAG UDS");
+        badge.setText("READ + CODING BETA • ELM327 • VAG UDS");
         badge.setTextSize(13);
         badge.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         badge.setPadding(0, dp(4), 0, dp(8));
@@ -171,7 +173,7 @@ public class MainActivity extends Activity {
         outputText.setTypeface(Typeface.MONOSPACE);
         outputText.setTextIsSelectable(true);
         outputText.setPadding(dp(4), dp(8), dp(4), dp(8));
-        outputText.setText("Pronto. Selecione o ELM327 e toque em Conectar.\n\nA v1.1 bloqueia comandos de escrita no veiculo.\n");
+        outputText.setText("Pronto. Selecione o ELM327 e toque em Conectar.\n\nCoding BETA: escrita liberada somente no 5F Multimidia, com backup e verificacao.\n");
         outputText.setVisibility(View.GONE);
         root.addView(outputText, fullWidth());
 
@@ -366,7 +368,7 @@ public class MainActivity extends Activity {
         try {
             VagModule engine = modules[0];
             selectModule(engine);
-            byte[] p = safePayload("22F190", 3000, engine.rxId);
+            byte[] p = readPayloadWithPending("22F190", engine, 5000);
             return IsoTpParser.decodeAsciiDid(p, 0xF190).replace("SEM RESPOSTA", "").trim();
         } catch (Exception e) {
             return "";
@@ -382,7 +384,7 @@ public class MainActivity extends Activity {
         progress.setMax(modules.length);
         progress.setProgress(0);
         results.clear();
-        outputText.setText("=== SCAN VAG v1.1 / READ ONLY ===\n");
+        outputText.setText("=== SCAN VAG v1.2 / READ + CODING BETA ===\n");
         renderModuleCards();
 
         worker.execute(() -> {
@@ -419,9 +421,9 @@ public class MainActivity extends Activity {
         ScanResult r = new ScanResult(m);
         try {
             selectModule(m);
-            byte[] p191 = safePayload("22F191", 2400, m.rxId);
-            byte[] p187 = safePayload("22F187", 2400, m.rxId);
-            byte[] p600 = safePayload("220600", 3200, m.rxId);
+            byte[] p191 = readPayloadWithPending("22F191", m, 6000);
+            byte[] p187 = readPayloadWithPending("22F187", m, 6000);
+            byte[] p600 = readPayloadWithPending("220600", m, 7000);
             r.present = p191 != null || p187 != null || p600 != null;
             if (r.present) {
                 r.f191 = IsoTpParser.decodeAsciiDid(p191, 0xF191);
@@ -435,12 +437,30 @@ public class MainActivity extends Activity {
         return r;
     }
 
-    private byte[] safePayload(String command, long timeout, String rxId) {
-        try {
-            return IsoTpParser.extractPayload(elm.command(command, timeout), rxId);
-        } catch (Exception e) {
-            return null;
+    private byte[] readPayloadWithPending(String command, VagModule module, long totalTimeoutMs) {
+        long deadline = android.os.SystemClock.elapsedRealtime() + totalTimeoutMs;
+        byte[] last = null;
+        int pendingCount = 0;
+        while (android.os.SystemClock.elapsedRealtime() < deadline) {
+            try {
+                String raw = elm.command(command, 2200);
+                byte[] payload = IsoTpParser.extractPayload(raw, module.rxId);
+                if (payload == null) {
+                    android.os.SystemClock.sleep(120);
+                    continue;
+                }
+                last = payload;
+                if (!IsoTpParser.isResponsePending(payload)) return payload;
+
+                pendingCount++;
+                appendFromWorker("[" + module.address + "] UDS 0x78 Response Pending (" + pendingCount + ")...\n");
+                postStatus("[" + module.address + "] ECU processando resposta...");
+                android.os.SystemClock.sleep(Math.min(650, 180 + pendingCount * 90L));
+            } catch (Exception e) {
+                android.os.SystemClock.sleep(120);
+            }
         }
+        return last;
     }
 
     private void startDtcScan() {
@@ -464,7 +484,7 @@ public class MainActivity extends Activity {
                     try {
                         postStatus("DTC " + r.module.address + " - " + r.module.name + "...");
                         selectModule(r.module);
-                        byte[] payload = safePayload("1902FF", 3500, r.module.rxId);
+                        byte[] payload = readPayloadWithPending("1902FF", r.module, 7000);
                         r.dtcs.clear();
                         r.dtcs.addAll(DtcParser.parse1902(payload));
                         if (r.dtcs.size() == 1 && (r.dtcs.get(0).startsWith("NEGATIVA") || r.dtcs.get(0).equals("SEM RESPOSTA"))) {
@@ -545,6 +565,14 @@ public class MainActivity extends Activity {
             coding.setPadding(0, dp(4), 0, 0);
             card.addView(coding, fullWidth());
         }
+        if (module.codingWriteAllowed) {
+            TextView beta = new TextView(this);
+            beta.setText("CODING BETA • backup + verificacao obrigatorios");
+            beta.setTextSize(11);
+            beta.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+            beta.setPadding(0, dp(5), 0, 0);
+            card.addView(beta, fullWidth());
+        }
 
         if (result != null) card.setOnClickListener(v -> showModuleDetails(result));
         return card;
@@ -581,7 +609,7 @@ public class MainActivity extends Activity {
 
     private String shortPart(ScanResult r) {
         String p = r.f191 == null ? "" : r.f191.trim();
-        if (p.isEmpty() || p.startsWith("NEGATIVA") || p.startsWith("SEM")) p = r.f187 == null ? "" : r.f187.trim();
+        if (p.isEmpty() || p.startsWith("NEGATIVA") || p.startsWith("PENDENTE") || p.startsWith("SEM")) p = r.f187 == null ? "" : r.f187.trim();
         return p.isEmpty() ? "identificacao lida" : p;
     }
 
@@ -603,16 +631,223 @@ public class MainActivity extends Activity {
             sb.append("Coding 0600:\n").append(valueOrDash(r.coding0600)).append("\n\n");
             sb.append("DTC: ").append(valueOrDash(r.dtcSummary)).append("\n");
             for (String d : r.dtcs) sb.append("• ").append(d).append("\n");
+            if (r.module.codingWriteAllowed) {
+                sb.append("\nCODING BETA: escrita habilitada somente neste modulo.\n");
+            }
         }
 
-        AlertDialog dialog = new AlertDialog.Builder(this)
+        AlertDialog.Builder b = new AlertDialog.Builder(this)
                 .setTitle("[" + r.module.address + "] " + r.module.name)
                 .setMessage(sb.toString())
-                .setPositiveButton("Fechar", null)
-                .setNeutralButton("Copiar coding", (d, which) -> copyCoding(r))
-                .setNegativeButton("Backup modulo", (d, which) -> saveModuleBackup(r))
-                .create();
-        dialog.show();
+                .setNegativeButton("Fechar", null)
+                .setNeutralButton("Copiar coding", (d, which) -> copyCoding(r));
+
+        if (r.present && r.module.codingWriteAllowed && isUsableCoding(r.coding0600)) {
+            b.setPositiveButton("Coding BETA", (d, which) -> showCodingEditor(r));
+        } else {
+            b.setPositiveButton("Backup modulo", (d, which) -> saveModuleBackup(r));
+        }
+        b.show();
+    }
+
+    private boolean isUsableCoding(String coding) {
+        if (coding == null) return false;
+        String c = coding.trim().toUpperCase(Locale.US);
+        return !c.isEmpty() && c.matches("[0-9A-F]+") && (c.length() % 2 == 0);
+    }
+
+    private void showCodingEditor(ScanResult r) {
+        if (!r.module.codingWriteAllowed || !"5F".equals(r.module.address)) {
+            toast("Escrita bloqueada neste modulo");
+            return;
+        }
+        final String original = r.coding0600.trim().toUpperCase(Locale.US);
+        final EditText input = new EditText(this);
+        input.setText(original);
+        input.setTextSize(13);
+        input.setTypeface(Typeface.MONOSPACE);
+        input.setSingleLine(false);
+        input.setSelectAllOnFocus(false);
+        input.setPadding(dp(12), dp(8), dp(12), dp(8));
+
+        new AlertDialog.Builder(this)
+                .setTitle("Coding BETA — [5F] Multimidia")
+                .setMessage("Edite somente o HEX do Coding 0600. O tamanho deve permanecer exatamente igual.\n\nOriginal:\n" + original)
+                .setView(input)
+                .setNegativeButton("Cancelar", null)
+                .setPositiveButton("Continuar", (d, which) -> {
+                    String candidate = normalizeCodingInput(input.getText().toString());
+                    if (candidate == null) {
+                        showSimpleError("Coding invalido", "Use apenas caracteres HEX 0-9 / A-F.");
+                        return;
+                    }
+                    if (candidate.length() != original.length()) {
+                        showSimpleError("Tamanho diferente", "Original: " + (original.length() / 2)
+                                + " bytes\nNovo: " + (candidate.length() / 2) + " bytes\n\nA v1.2 bloqueia alteracao de tamanho.");
+                        return;
+                    }
+                    if (candidate.equals(original)) {
+                        toast("Coding nao foi alterado");
+                        return;
+                    }
+                    prepareCodingWrite(r, original, candidate);
+                })
+                .show();
+    }
+
+    private String normalizeCodingInput(String text) {
+        if (text == null) return null;
+        String t = text.trim();
+        if (!t.matches("[0-9A-Fa-f\\s]+")) return null;
+        String hex = t.replaceAll("\\s+", "").toUpperCase(Locale.US);
+        if (hex.isEmpty() || (hex.length() % 2) != 0) return null;
+        return hex;
+    }
+
+    private void prepareCodingWrite(ScanResult r, String originalFromScreen, String candidate) {
+        setBusy(true);
+        setStatus("Preparando Coding BETA...");
+        worker.execute(() -> {
+            try {
+                selectModule(r.module);
+                byte[] freshPayload = readPayloadWithPending("220600", r.module, 7000);
+                String fresh = IsoTpParser.decodeHexDid(freshPayload, 0x0600);
+                if (!isUsableCoding(fresh)) throw new Exception("Nao foi possivel reler o coding original: " + fresh);
+                fresh = fresh.trim().toUpperCase(Locale.US);
+                if (!fresh.equals(originalFromScreen)) {
+                    throw new Exception("O coding mudou desde o scan. Faca um novo Scan VAG antes de gravar.");
+                }
+
+                String voltageRaw = clean(elm.command("ATRV", 1200));
+                double voltage = parseVoltage(voltageRaw);
+                if (Double.isNaN(voltage)) throw new Exception("Nao consegui validar a tensao (ATRV: " + voltageRaw + ")");
+                if (voltage < 11.8) throw new Exception(String.format(Locale.US,
+                        "Tensao baixa para coding: %.2f V. Use carregador/fonte e tente novamente.", voltage));
+
+                String backupText = ReportManager.buildModuleText(vin, elmInfo, protocol, r);
+                File backup = ReportManager.saveModuleText(this, vin, r, backupText);
+                final String freshFinal = fresh;
+                final double voltageFinal = voltage;
+                final String backupPath = backup.getAbsolutePath();
+                main.post(() -> {
+                    setBusy(false);
+                    showFinalCodingConfirmation(r, freshFinal, candidate, voltageFinal, backupPath);
+                });
+            } catch (Exception e) {
+                main.post(() -> {
+                    setBusy(false);
+                    setStatus("Coding BETA cancelado");
+                    showSimpleError("Nao foi possivel preparar a gravacao", e.getMessage());
+                });
+            }
+        });
+    }
+
+    private double parseVoltage(String raw) {
+        if (raw == null) return Double.NaN;
+        String cleaned = raw.toUpperCase(Locale.US).replace("V", "").replace(",", ".").trim();
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("([0-9]+(?:\\.[0-9]+)?)").matcher(cleaned);
+        if (!m.find()) return Double.NaN;
+        try { return Double.parseDouble(m.group(1)); } catch (Exception e) { return Double.NaN; }
+    }
+
+    private void showFinalCodingConfirmation(ScanResult r, String original, String candidate,
+                                             double voltage, String backupPath) {
+        final EditText confirm = new EditText(this);
+        confirm.setHint("Digite GRAVAR");
+        confirm.setSingleLine(true);
+
+        String message = "BACKUP SALVO:\n" + backupPath
+                + "\n\nTensao: " + String.format(Locale.US, "%.2f V", voltage)
+                + "\n\nORIGINAL:\n" + original
+                + "\n\nNOVO:\n" + candidate
+                + "\n\nEsta versao grava somente o DID 0600 do modulo 5F."
+                + "\nDigite GRAVAR para confirmar.";
+
+        new AlertDialog.Builder(this)
+                .setTitle("Confirmacao final — CODING BETA")
+                .setMessage(message)
+                .setView(confirm)
+                .setNegativeButton("Cancelar", null)
+                .setPositiveButton("Gravar", (d, which) -> {
+                    if (!"GRAVAR".equalsIgnoreCase(confirm.getText().toString().trim())) {
+                        showSimpleError("Confirmacao incorreta", "Nada foi enviado ao modulo.");
+                        return;
+                    }
+                    performCodingWrite(r, original, candidate);
+                })
+                .show();
+    }
+
+    private void performCodingWrite(ScanResult r, String original, String candidate) {
+        if (!r.module.codingWriteAllowed || !"5F".equals(r.module.address)) {
+            toast("Escrita bloqueada neste modulo");
+            return;
+        }
+        setBusy(true);
+        setStatus("Gravando Coding 0600 no 5F...");
+        append("\n=== CODING BETA 5F ===\nOriginal: " + original + "\nNovo: " + candidate + "\n");
+
+        worker.execute(() -> {
+            try {
+                selectModule(r.module);
+                elm.command("ATAL", 1000); // permite mensagens ISO-TP longas em adaptadores compativeis
+
+                byte[] session = IsoTpParser.extractPayload(elm.codingCommand("1003", 2500), r.module.rxId);
+                if (IsoTpParser.isResponsePending(session)) {
+                    android.os.SystemClock.sleep(650);
+                } else if (!IsoTpParser.isPositiveSession(session, 0x03)) {
+                    throw new Exception("Sessao diagnostica recusada: " + IsoTpParser.describe(session));
+                }
+
+                String writeRaw = elm.codingCommand("2E0600" + candidate, 4500);
+                byte[] writePayload = IsoTpParser.extractPayload(writeRaw, r.module.rxId);
+                boolean pending = IsoTpParser.isResponsePending(writePayload);
+                if (!pending && !IsoTpParser.isPositiveWriteDid(writePayload, 0x0600)) {
+                    throw new Exception("ECU recusou a escrita: " + IsoTpParser.describe(writePayload));
+                }
+
+                if (pending) android.os.SystemClock.sleep(900);
+                else android.os.SystemClock.sleep(350);
+
+                byte[] verifyPayload = readPayloadWithPending("220600", r.module, 8000);
+                String verified = IsoTpParser.decodeHexDid(verifyPayload, 0x0600);
+                if (!candidate.equalsIgnoreCase(verified)) {
+                    throw new Exception("Verificacao falhou. ECU retornou: " + verified
+                            + "\nO backup original foi mantido; nao sera feita nova escrita automaticamente.");
+                }
+
+                r.coding0600 = verified.toUpperCase(Locale.US);
+                refreshReport();
+                main.post(() -> {
+                    setBusy(false);
+                    setStatus("Coding 5F gravado e verificado");
+                    renderModuleCards();
+                    append("Resultado: OK — releitura identica ao novo coding.\n=== FIM CODING ===\n");
+                    new AlertDialog.Builder(this)
+                            .setTitle("Coding concluido")
+                            .setMessage("O modulo 5F confirmou o Coding 0600 e a releitura ficou identica ao valor gravado.\n\nNovo coding:\n" + r.coding0600)
+                            .setPositiveButton("OK", null)
+                            .show();
+                });
+            } catch (Exception e) {
+                main.post(() -> {
+                    setBusy(false);
+                    setStatus("Coding nao concluido");
+                    append("ERRO CODING: " + e.getMessage() + "\n=== FIM CODING ===\n");
+                    showSimpleError("Coding nao concluido", e.getMessage()
+                            + "\n\nNenhum bypass de Security Access e feito pela v1.2.");
+                });
+            }
+        });
+    }
+
+    private void showSimpleError(String title, String message) {
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(message == null ? "Erro desconhecido" : message)
+                .setPositiveButton("OK", null)
+                .show();
     }
 
     private String valueOrDash(String s) {

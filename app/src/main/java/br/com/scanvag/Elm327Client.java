@@ -55,10 +55,29 @@ public final class Elm327Client {
         socket = null;
     }
 
+    /**
+     * Canal normal do aplicativo: somente leitura UDS + comandos AT.
+     */
     public synchronized String command(String command, long timeoutMs) throws IOException {
-        if (!isConnected()) throw new IOException("ELM327 não conectado");
-        String cmd = command == null ? "" : command.trim().toUpperCase(Locale.US).replace(" ", "");
+        String cmd = normalize(command);
         enforceReadOnly(cmd);
+        return execute(cmd, timeoutMs);
+    }
+
+    /**
+     * Canal separado e deliberado para o fluxo de Coding BETA.
+     * Não aceita SecurityAccess (27), RoutineControl (31), ClearDTC (14), reset (11), etc.
+     */
+    public synchronized String codingCommand(String command, long timeoutMs) throws IOException {
+        String cmd = normalize(command);
+        if (!(cmd.startsWith("10") || cmd.startsWith("2E") || cmd.startsWith("3E"))) {
+            throw new IOException("Comando fora da whitelist de Coding BETA: " + cmd);
+        }
+        return execute(cmd, timeoutMs);
+    }
+
+    private String execute(String cmd, long timeoutMs) throws IOException {
+        if (!isConnected()) throw new IOException("ELM327 não conectado");
 
         drainInput();
         output.write((cmd + "\r").getBytes(StandardCharsets.US_ASCII));
@@ -85,11 +104,15 @@ public final class Elm327Client {
         return response.toString().replace(">", "").trim();
     }
 
+    private String normalize(String command) {
+        return (command == null ? "" : command.trim().toUpperCase(Locale.US).replace(" ", ""));
+    }
+
     private void enforceReadOnly(String cmd) throws IOException {
         if (cmd.startsWith("AT")) return;
-        // Whitelist: UDS ReadDataByIdentifier (22) and ReadDTCInformation (19).
+        // Whitelist de leitura: UDS ReadDataByIdentifier (22) e ReadDTCInformation (19).
         if (cmd.startsWith("22") || cmd.startsWith("19")) return;
-        throw new IOException("Bloqueado pelo modo READ-ONLY: " + cmd);
+        throw new IOException("Bloqueado pelo modo de leitura: " + cmd);
     }
 
     private void drainInput() throws IOException {

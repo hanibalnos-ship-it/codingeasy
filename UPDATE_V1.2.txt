@@ -1,0 +1,14 @@
+SCANVAG v1.2 - PATCH PARA O REPOSITORIO ATUAL
+
+1. Extraia este ZIP.
+2. No GitHub: Code > Add file > Upload files.
+3. Arraste o CONTEUDO extraido, preservando app/ e .github/.
+4. Commit message: ScanVAG v1.2 coding beta
+5. Aguarde Actions ficar verde.
+6. Baixe o artifact ScanVAG-v1.2-debug-apk.
+7. Extraia e instale app-debug.apk por cima da v1.1.
+
+IMPORTANTE:
+- A escrita BETA esta habilitada SOMENTE no modulo 5F Multimidia.
+- Os demais modulos permanecem bloqueados para escrita.
+- Antes da escrita o app salva backup, verifica tensao e exige a palavra GRAVAR.

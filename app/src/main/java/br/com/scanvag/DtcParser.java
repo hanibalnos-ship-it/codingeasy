@@ -16,8 +16,13 @@ public final class DtcParser {
             return out;
         }
         if (payload.length >= 3 && (payload[0] & 0xFF) == 0x7F) {
-            out.add(String.format(Locale.US, "NEGATIVA 7F %02X %02X",
-                    payload[1] & 0xFF, payload[2] & 0xFF));
+            if ((payload[2] & 0xFF) == 0x78) {
+                out.add(String.format(Locale.US, "PENDENTE 7F %02X 78",
+                        payload[1] & 0xFF));
+            } else {
+                out.add(String.format(Locale.US, "NEGATIVA 7F %02X %02X",
+                        payload[1] & 0xFF, payload[2] & 0xFF));
+            }
             return out;
         }
         if (payload.length < 3 || (payload[0] & 0xFF) != 0x59 || (payload[1] & 0xFF) != 0x02) {

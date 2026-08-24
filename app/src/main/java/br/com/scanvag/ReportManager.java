@@ -16,7 +16,7 @@ public final class ReportManager {
 
     public static String buildText(String vin, String elmInfo, String protocol, List<ScanResult> results) {
         StringBuilder sb = new StringBuilder();
-        sb.append("ScanVAG v1.1 - READ ONLY\n");
+        sb.append("ScanVAG v1.2 - READ + CODING BETA\n");
         sb.append("Data: ").append(nowHuman()).append("\n");
         sb.append("VIN: ").append(empty(vin)).append("\n");
         sb.append("ELM: ").append(empty(elmInfo)).append("\n");
@@ -30,7 +30,7 @@ public final class ReportManager {
 
     public static String buildModuleText(String vin, String elmInfo, String protocol, ScanResult result) {
         StringBuilder sb = new StringBuilder();
-        sb.append("ScanVAG v1.1 - BACKUP DE MODULO / READ ONLY\n");
+        sb.append("ScanVAG v1.2 - BACKUP DE MODULO\n");
         sb.append("Data: ").append(nowHuman()).append("\n");
         sb.append("VIN: ").append(empty(vin)).append("\n");
         sb.append("ELM: ").append(empty(elmInfo)).append("\n");

@@ -78,6 +78,25 @@ public final class IsoTpParser {
         return null;
     }
 
+    public static boolean isResponsePending(byte[] payload) {
+        return payload != null && payload.length >= 3
+                && (payload[0] & 0xFF) == 0x7F
+                && (payload[2] & 0xFF) == 0x78;
+    }
+
+    public static boolean isPositiveWriteDid(byte[] payload, int did) {
+        return payload != null && payload.length >= 3
+                && (payload[0] & 0xFF) == 0x6E
+                && (payload[1] & 0xFF) == ((did >> 8) & 0xFF)
+                && (payload[2] & 0xFF) == (did & 0xFF);
+    }
+
+    public static boolean isPositiveSession(byte[] payload, int subFunction) {
+        return payload != null && payload.length >= 2
+                && (payload[0] & 0xFF) == 0x50
+                && (payload[1] & 0x7F) == (subFunction & 0x7F);
+    }
+
     public static boolean isPositiveDid(byte[] payload, int did) {
         return payload != null && payload.length >= 3
                 && (payload[0] & 0xFF) == 0x62
@@ -110,6 +129,9 @@ public final class IsoTpParser {
     public static String describe(byte[] payload) {
         if (payload == null || payload.length == 0) return "SEM RESPOSTA";
         if (payload.length >= 3 && (payload[0] & 0xFF) == 0x7F) {
+            if ((payload[2] & 0xFF) == 0x78) {
+                return String.format(Locale.US, "PENDENTE 7F %02X 78", payload[1] & 0xFF);
+            }
             return String.format(Locale.US, "NEGATIVA 7F %02X %02X",
                     payload[1] & 0xFF, payload[2] & 0xFF);
         }
