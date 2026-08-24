@@ -1,0 +1,12 @@
+ScanVAG v1.0 COMPLETE
+
+Raiz correta do projeto = pasta que contém diretamente:
+- app/
+- gradle/
+- gradlew
+- gradlew.bat
+- build.gradle
+- settings.gradle
+
+Build: ./gradlew assembleDebug
+Saída: app/build/outputs/apk/debug/app-debug.apk

@@ -1,0 +1,11 @@
+ScanVAG v1.0 validation performed in the build workspace:
+
+- Full Java source compiled successfully against Android API stubs (syntax/type validation).
+- ISO-TP parser tested against captured responses from:
+  * 17-Instruments (77E), DID 0600
+  * 19-Gateway (77A), DID 0600
+- Panel result reconstructed: 04AD0898EE8C000C018B77471001000080000000
+- Gateway result reconstructed: 030500047F085900FB0722DE1E0F00010001070000000000000000000000
+- Elm327Client has a hard read-only whitelist: AT / UDS 22 / UDS 19 only.
+
+An actual Android APK was not produced in this workspace because the full Android SDK/build tools are not installed here. Use Android Studio, another Gradle Android environment, or the included GitHub Actions workflow.
