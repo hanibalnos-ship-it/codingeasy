@@ -2,6 +2,7 @@ package br.com.scanvag;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.content.ClipData;
@@ -9,11 +10,14 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.Gravity;
 import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -43,24 +47,26 @@ public class MainActivity extends Activity {
 
     private final VagModule[] modules = new VagModule[]{
             new VagModule("01", "Motor", "7E0", "7E8"),
-            new VagModule("02", "Câmbio", "7E1", "7E9"),
-            new VagModule("09", "BCM / Central Elétrica", "70E", "778"),
+            new VagModule("02", "Cambio", "7E1", "7E9"),
+            new VagModule("03", "ABS / Freios", "713", "77D"),
+            new VagModule("09", "BCM / Central Eletrica", "70E", "778"),
             new VagModule("17", "Painel / Instruments", "714", "77E"),
             new VagModule("19", "Gateway", "710", "77A"),
-            new VagModule("5F", "Multimídia", "773", "7DD")
+            new VagModule("5F", "Multimidia", "773", "7DD")
     };
 
     private BluetoothAdapter bluetoothAdapter;
     private Spinner deviceSpinner;
-    private Button refreshButton, connectButton, scanButton, dtcButton, backupButton, shareButton, disconnectButton;
-    private TextView statusText, vehicleText, outputText;
+    private Button refreshButton, connectButton, scanButton, dtcButton, backupButton, shareButton, disconnectButton, logButton;
+    private TextView statusText, vehicleText, outputText, moduleCountText;
+    private LinearLayout cardsContainer;
     private ProgressBar progress;
-    private ScrollView scrollView;
 
     private String vin = "";
     private String elmInfo = "";
     private String protocol = "";
     private String lastReport = "";
+    private boolean logVisible = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -72,13 +78,17 @@ public class MainActivity extends Activity {
 
     private void buildUi() {
         int pad = dp(14);
+
+        ScrollView page = new ScrollView(this);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(pad, pad, pad, pad);
+        root.setPadding(pad, pad, pad, dp(28));
+        page.addView(root, new ScrollView.LayoutParams(
+                ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
 
         TextView title = new TextView(this);
-        title.setText("ScanVAG v1.0");
-        title.setTextSize(25);
+        title.setText("ScanVAG v1.1");
+        title.setTextSize(27);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         root.addView(title, fullWidth());
 
@@ -91,13 +101,14 @@ public class MainActivity extends Activity {
 
         statusText = new TextView(this);
         statusText.setText("Status: aguardando Bluetooth");
+        statusText.setTextSize(15);
         statusText.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         root.addView(statusText, fullWidth());
 
         vehicleText = new TextView(this);
         vehicleText.setText("VIN: -\nELM: -\nProtocolo: -");
         vehicleText.setTextSize(13);
-        vehicleText.setPadding(0, dp(5), 0, dp(8));
+        vehicleText.setPadding(0, dp(5), 0, dp(10));
         root.addView(vehicleText, fullWidth());
 
         deviceSpinner = new Spinner(this);
@@ -118,31 +129,51 @@ public class MainActivity extends Activity {
         root.addView(row2, fullWidth());
 
         LinearLayout row3 = row();
-        backupButton = button("Salvar backup");
+        backupButton = button("Backup geral");
         shareButton = button("Compartilhar");
         row3.addView(backupButton, weighted());
         row3.addView(shareButton, weighted());
         root.addView(row3, fullWidth());
 
         disconnectButton = button("Desconectar");
-        root.addView(disconnectButton, fullWidth());
+        root.addView(disconnectButton, fullWidthWithMargin());
 
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(modules.length);
         progress.setProgress(0);
-        root.addView(progress, fullWidth());
+        LinearLayout.LayoutParams progressParams = fullWidth();
+        progressParams.setMargins(0, dp(8), 0, dp(8));
+        root.addView(progress, progressParams);
 
-        scrollView = new ScrollView(this);
+        LinearLayout moduleHeader = row();
+        TextView moduleTitle = new TextView(this);
+        moduleTitle.setText("Modulos");
+        moduleTitle.setTextSize(19);
+        moduleTitle.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        moduleCountText = new TextView(this);
+        moduleCountText.setText("0/" + modules.length + " encontrados");
+        moduleCountText.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        moduleHeader.addView(moduleTitle, weightedNoMargin());
+        moduleHeader.addView(moduleCountText, weightedNoMargin());
+        root.addView(moduleHeader, fullWidth());
+
+        cardsContainer = new LinearLayout(this);
+        cardsContainer.setOrientation(LinearLayout.VERTICAL);
+        cardsContainer.setPadding(0, dp(5), 0, dp(5));
+        root.addView(cardsContainer, fullWidth());
+        renderModuleCards();
+
+        logButton = button("Mostrar log tecnico");
+        root.addView(logButton, fullWidthWithMargin());
+
         outputText = new TextView(this);
-        outputText.setTextSize(13);
+        outputText.setTextSize(12);
         outputText.setTypeface(Typeface.MONOSPACE);
         outputText.setTextIsSelectable(true);
-        outputText.setText("Pronto. Selecione o ELM327 e toque em Conectar.\n\nA v1.0 bloqueia qualquer comando de escrita no veículo.\n");
-        scrollView.addView(outputText, fullWidth());
-        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
-        scrollParams.topMargin = dp(8);
-        root.addView(scrollView, scrollParams);
+        outputText.setPadding(dp(4), dp(8), dp(4), dp(8));
+        outputText.setText("Pronto. Selecione o ELM327 e toque em Conectar.\n\nA v1.1 bloqueia comandos de escrita no veiculo.\n");
+        outputText.setVisibility(View.GONE);
+        root.addView(outputText, fullWidth());
 
         refreshButton.setOnClickListener(v -> refreshBondedDevices());
         connectButton.setOnClickListener(v -> connectSelected());
@@ -151,9 +182,16 @@ public class MainActivity extends Activity {
         backupButton.setOnClickListener(v -> saveBackup());
         shareButton.setOnClickListener(v -> shareReport());
         disconnectButton.setOnClickListener(v -> disconnectElm());
+        logButton.setOnClickListener(v -> toggleLog());
 
         setConnectedUi(false);
-        setContentView(root);
+        setContentView(page);
+    }
+
+    private void toggleLog() {
+        logVisible = !logVisible;
+        outputText.setVisibility(logVisible ? View.VISIBLE : View.GONE);
+        logButton.setText(logVisible ? "Ocultar log tecnico" : "Mostrar log tecnico");
     }
 
     private LinearLayout row() {
@@ -173,10 +211,20 @@ public class MainActivity extends Activity {
         return new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
     }
 
+    private LinearLayout.LayoutParams fullWidthWithMargin() {
+        LinearLayout.LayoutParams p = fullWidth();
+        p.setMargins(dp(3), dp(4), dp(3), dp(4));
+        return p;
+    }
+
     private LinearLayout.LayoutParams weighted() {
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         p.setMargins(dp(3), dp(4), dp(3), dp(4));
         return p;
+    }
+
+    private LinearLayout.LayoutParams weightedNoMargin() {
+        return new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
     }
 
     private int dp(int value) {
@@ -203,8 +251,8 @@ public class MainActivity extends Activity {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 refreshBondedDevices();
             } else {
-                setStatus("Permissão Bluetooth negada");
-                append("Conceda 'Dispositivos próximos' para acessar o ELM327.\n");
+                setStatus("Permissao Bluetooth negada");
+                append("Conceda 'Dispositivos proximos' para acessar o ELM327.\n");
             }
         }
     }
@@ -215,7 +263,7 @@ public class MainActivity extends Activity {
             return;
         }
         if (bluetoothAdapter == null) {
-            setStatus("Bluetooth não disponível");
+            setStatus("Bluetooth nao disponivel");
             return;
         }
         if (!bluetoothAdapter.isEnabled()) {
@@ -226,7 +274,15 @@ public class MainActivity extends Activity {
         bondedDevices.clear();
         Set<BluetoothDevice> bonded = bluetoothAdapter.getBondedDevices();
         if (bonded != null) bondedDevices.addAll(bonded);
-        bondedDevices.sort(Comparator.comparing(d -> safeName(d).toLowerCase()));
+        bondedDevices.sort(new Comparator<BluetoothDevice>() {
+            @Override
+            public int compare(BluetoothDevice a, BluetoothDevice b) {
+                int pa = obdPriority(safeName(a));
+                int pb = obdPriority(safeName(b));
+                if (pa != pb) return Integer.compare(pa, pb);
+                return safeName(a).compareToIgnoreCase(safeName(b));
+            }
+        });
 
         List<String> labels = new ArrayList<>();
         for (BluetoothDevice d : bondedDevices) labels.add(safeName(d) + "  [" + d.getAddress() + "]");
@@ -234,6 +290,12 @@ public class MainActivity extends Activity {
 
         deviceSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, labels));
         setStatus(bondedDevices.isEmpty() ? "Nenhum dispositivo pareado" : "Selecione o ELM327 / OBDII");
+    }
+
+    private int obdPriority(String name) {
+        String n = name == null ? "" : name.toUpperCase();
+        if (n.contains("OBD") || n.contains("ELM") || n.contains("VLINK") || n.contains("VEEPEAK")) return 0;
+        return 1;
     }
 
     private String safeName(BluetoothDevice d) {
@@ -259,7 +321,7 @@ public class MainActivity extends Activity {
         BluetoothDevice device = bondedDevices.get(pos);
         setBusy(true);
         setStatus("Conectando a " + safeName(device) + "...");
-        append("\n=== CONEXÃO ===\nBluetooth: " + safeName(device) + " / " + device.getAddress() + "\n");
+        append("\n=== CONEXAO ===\nBluetooth: " + safeName(device) + " / " + device.getAddress() + "\n");
 
         worker.execute(() -> {
             try {
@@ -275,8 +337,11 @@ public class MainActivity extends Activity {
                 elm.command("ATCFC1", 1000);
                 elm.command("ATFCSD300000", 1000);
                 elm.command("ATFCSM1", 1000);
-                protocol = clean(elm.command("ATDP", 1500));
+
+                // Primeiro gera trafego real. Depois ATDP passa a informar o protocolo detectado,
+                // em vez de exibir somente AUTO.
                 vin = readVin();
+                protocol = clean(elm.command("ATDP", 1500));
 
                 main.post(() -> {
                     setBusy(false);
@@ -301,7 +366,7 @@ public class MainActivity extends Activity {
         try {
             VagModule engine = modules[0];
             selectModule(engine);
-            byte[] p = IsoTpParser.extractPayload(elm.command("22F190", 3000), engine.rxId);
+            byte[] p = safePayload("22F190", 3000, engine.rxId);
             return IsoTpParser.decodeAsciiDid(p, 0xF190).replace("SEM RESPOSTA", "").trim();
         } catch (Exception e) {
             return "";
@@ -310,17 +375,19 @@ public class MainActivity extends Activity {
 
     private void startScan() {
         if (!elm.isConnected()) {
-            setStatus("ELM327 não conectado");
+            setStatus("ELM327 nao conectado");
             return;
         }
         setBusy(true);
+        progress.setMax(modules.length);
         progress.setProgress(0);
         results.clear();
-        outputText.setText("=== SCAN VAG v1.0 / READ ONLY ===\n");
+        outputText.setText("=== SCAN VAG v1.1 / READ ONLY ===\n");
+        renderModuleCards();
 
         worker.execute(() -> {
+            int done = 0;
             try {
-                int done = 0;
                 for (VagModule m : modules) {
                     postStatus("Lendo " + m.address + " - " + m.name + "...");
                     ScanResult result = scanModule(m);
@@ -328,7 +395,10 @@ public class MainActivity extends Activity {
                     postModule(result);
                     done++;
                     final int p = done;
-                    main.post(() -> progress.setProgress(p));
+                    main.post(() -> {
+                        progress.setProgress(p);
+                        renderModuleCards();
+                    });
                 }
                 refreshReport();
                 postStatus("Scan finalizado");
@@ -337,71 +407,89 @@ public class MainActivity extends Activity {
                 postStatus("Scan interrompido");
                 postAppend("\nERRO NO SCAN: " + e.getMessage() + "\n");
             } finally {
-                main.post(() -> setBusy(false));
+                main.post(() -> {
+                    setBusy(false);
+                    renderModuleCards();
+                });
             }
         });
     }
 
-    private ScanResult scanModule(VagModule m) throws Exception {
-        selectModule(m);
+    private ScanResult scanModule(VagModule m) {
         ScanResult r = new ScanResult(m);
-        byte[] p191 = IsoTpParser.extractPayload(elm.command("22F191", 2400), m.rxId);
-        byte[] p187 = IsoTpParser.extractPayload(elm.command("22F187", 2400), m.rxId);
-        byte[] p600 = IsoTpParser.extractPayload(elm.command("220600", 3200), m.rxId);
-        r.present = p191 != null || p187 != null || p600 != null;
-        if (r.present) {
-            r.f191 = IsoTpParser.decodeAsciiDid(p191, 0xF191);
-            r.f187 = IsoTpParser.decodeAsciiDid(p187, 0xF187);
-            r.coding0600 = IsoTpParser.decodeHexDid(p600, 0x0600);
+        try {
+            selectModule(m);
+            byte[] p191 = safePayload("22F191", 2400, m.rxId);
+            byte[] p187 = safePayload("22F187", 2400, m.rxId);
+            byte[] p600 = safePayload("220600", 3200, m.rxId);
+            r.present = p191 != null || p187 != null || p600 != null;
+            if (r.present) {
+                r.f191 = IsoTpParser.decodeAsciiDid(p191, 0xF191);
+                r.f187 = IsoTpParser.decodeAsciiDid(p187, 0xF187);
+                r.coding0600 = IsoTpParser.decodeHexDid(p600, 0x0600);
+            }
+        } catch (Exception e) {
+            r.present = false;
+            appendFromWorker("[" + m.address + "] erro: " + e.getMessage() + "\n");
         }
         return r;
     }
 
+    private byte[] safePayload(String command, long timeout, String rxId) {
+        try {
+            return IsoTpParser.extractPayload(elm.command(command, timeout), rxId);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private void startDtcScan() {
         if (!elm.isConnected()) {
-            setStatus("ELM327 não conectado");
+            setStatus("ELM327 nao conectado");
             return;
         }
         if (results.isEmpty()) {
-            toast("Faça o Scan VAG primeiro");
+            toast("Faca o Scan VAG primeiro");
             return;
         }
         setBusy(true);
+        progress.setMax(results.size());
         progress.setProgress(0);
         append("\n=== LEITURA DTC UDS ===\n");
 
         worker.execute(() -> {
             int done = 0;
-            try {
-                for (ScanResult r : results) {
-                    if (!r.present) {
-                        done++;
-                        continue;
+            for (ScanResult r : results) {
+                if (r.present) {
+                    try {
+                        postStatus("DTC " + r.module.address + " - " + r.module.name + "...");
+                        selectModule(r.module);
+                        byte[] payload = safePayload("1902FF", 3500, r.module.rxId);
+                        r.dtcs.clear();
+                        r.dtcs.addAll(DtcParser.parse1902(payload));
+                        if (r.dtcs.size() == 1 && (r.dtcs.get(0).startsWith("NEGATIVA") || r.dtcs.get(0).equals("SEM RESPOSTA"))) {
+                            r.dtcSummary = r.dtcs.get(0);
+                        } else {
+                            r.dtcSummary = r.dtcs.isEmpty() ? "0 DTC" : r.dtcs.size() + " registro(s)";
+                        }
+                        postAppend("[" + r.module.address + "] " + r.module.name + ": " + r.dtcSummary + "\n");
+                    } catch (Exception e) {
+                        r.dtcSummary = "ERRO: " + e.getMessage();
                     }
-                    postStatus("DTC " + r.module.address + " - " + r.module.name + "...");
-                    selectModule(r.module);
-                    byte[] payload = IsoTpParser.extractPayload(elm.command("1902FF", 3500), r.module.rxId);
-                    r.dtcs.clear();
-                    r.dtcs.addAll(DtcParser.parse1902(payload));
-                    if (r.dtcs.size() == 1 && (r.dtcs.get(0).startsWith("NEGATIVA") || r.dtcs.get(0).equals("SEM RESPOSTA"))) {
-                        r.dtcSummary = r.dtcs.get(0);
-                    } else {
-                        r.dtcSummary = r.dtcs.isEmpty() ? "0 DTC" : r.dtcs.size() + " registro(s)";
-                    }
-                    postAppend("[" + r.module.address + "] " + r.module.name + ": " + r.dtcSummary + "\n");
-                    for (String d : r.dtcs) postAppend("   " + d + "\n");
-                    done++;
-                    final int p = done;
-                    main.post(() -> progress.setProgress(p));
                 }
-                refreshReport();
-                postStatus("Leitura DTC finalizada");
-            } catch (Exception e) {
-                postStatus("Falha na leitura DTC");
-                postAppend("ERRO DTC: " + e.getMessage() + "\n");
-            } finally {
-                main.post(() -> setBusy(false));
+                done++;
+                final int p = done;
+                main.post(() -> {
+                    progress.setProgress(p);
+                    renderModuleCards();
+                });
             }
+            refreshReport();
+            postStatus("Leitura DTC finalizada");
+            main.post(() -> {
+                setBusy(false);
+                renderModuleCards();
+            });
         });
     }
 
@@ -409,6 +497,149 @@ public class MainActivity extends Activity {
         elm.command("ATSH" + m.txId, 1000);
         elm.command("ATFCSH" + m.txId, 1000);
         elm.command("ATCRA" + m.rxId, 1000);
+    }
+
+    private void renderModuleCards() {
+        cardsContainer.removeAllViews();
+        int found = 0;
+
+        for (VagModule module : modules) {
+            ScanResult result = findResult(module.address);
+            if (result != null && result.present) found++;
+            cardsContainer.addView(createModuleCard(module, result), fullWidthWithCardMargin());
+        }
+        moduleCountText.setText(found + "/" + modules.length + " encontrados");
+    }
+
+    private View createModuleCard(VagModule module, ScanResult result) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(13), dp(11), dp(13), dp(11));
+        card.setBackground(cardBackground(result));
+        card.setClickable(result != null);
+        card.setFocusable(result != null);
+
+        TextView title = new TextView(this);
+        title.setText("[" + module.address + "] " + module.name);
+        title.setTextSize(17);
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        card.addView(title, fullWidth());
+
+        TextView status = new TextView(this);
+        if (result == null) {
+            status.setText("Aguardando scan");
+        } else if (!result.present) {
+            status.setText("Sem resposta • TX/RX " + module.txId + "/" + module.rxId);
+        } else {
+            status.setText("OK • " + shortPart(result) + " • DTC: " + result.dtcSummary);
+        }
+        status.setTextSize(13);
+        status.setPadding(0, dp(4), 0, 0);
+        card.addView(status, fullWidth());
+
+        if (result != null && result.present && result.coding0600 != null && !result.coding0600.isEmpty()) {
+            TextView coding = new TextView(this);
+            coding.setTypeface(Typeface.MONOSPACE);
+            coding.setTextSize(11);
+            coding.setText("Coding: " + ellipsize(result.coding0600, 44));
+            coding.setPadding(0, dp(4), 0, 0);
+            card.addView(coding, fullWidth());
+        }
+
+        if (result != null) card.setOnClickListener(v -> showModuleDetails(result));
+        return card;
+    }
+
+    private GradientDrawable cardBackground(ScanResult result) {
+        GradientDrawable d = new GradientDrawable();
+        d.setCornerRadius(dp(10));
+        if (result == null) {
+            d.setColor(Color.rgb(245, 245, 245));
+            d.setStroke(dp(1), Color.rgb(210, 210, 210));
+        } else if (result.present) {
+            d.setColor(Color.rgb(238, 247, 240));
+            d.setStroke(dp(1), Color.rgb(140, 190, 150));
+        } else {
+            d.setColor(Color.rgb(250, 244, 244));
+            d.setStroke(dp(1), Color.rgb(205, 170, 170));
+        }
+        return d;
+    }
+
+    private LinearLayout.LayoutParams fullWidthWithCardMargin() {
+        LinearLayout.LayoutParams p = fullWidth();
+        p.setMargins(0, dp(4), 0, dp(4));
+        return p;
+    }
+
+    private ScanResult findResult(String address) {
+        for (ScanResult r : results) {
+            if (r.module.address.equals(address)) return r;
+        }
+        return null;
+    }
+
+    private String shortPart(ScanResult r) {
+        String p = r.f191 == null ? "" : r.f191.trim();
+        if (p.isEmpty() || p.startsWith("NEGATIVA") || p.startsWith("SEM")) p = r.f187 == null ? "" : r.f187.trim();
+        return p.isEmpty() ? "identificacao lida" : p;
+    }
+
+    private String ellipsize(String text, int max) {
+        if (text == null) return "";
+        if (text.length() <= max) return text;
+        return text.substring(0, max) + "...";
+    }
+
+    private void showModuleDetails(ScanResult r) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Endereco: ").append(r.module.address).append("\n");
+        sb.append("TX/RX: ").append(r.module.txId).append("/").append(r.module.rxId).append("\n\n");
+        if (!r.present) {
+            sb.append("Modulo sem resposta no ultimo scan.");
+        } else {
+            sb.append("F191: ").append(valueOrDash(r.f191)).append("\n");
+            sb.append("F187: ").append(valueOrDash(r.f187)).append("\n\n");
+            sb.append("Coding 0600:\n").append(valueOrDash(r.coding0600)).append("\n\n");
+            sb.append("DTC: ").append(valueOrDash(r.dtcSummary)).append("\n");
+            for (String d : r.dtcs) sb.append("• ").append(d).append("\n");
+        }
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("[" + r.module.address + "] " + r.module.name)
+                .setMessage(sb.toString())
+                .setPositiveButton("Fechar", null)
+                .setNeutralButton("Copiar coding", (d, which) -> copyCoding(r))
+                .setNegativeButton("Backup modulo", (d, which) -> saveModuleBackup(r))
+                .create();
+        dialog.show();
+    }
+
+    private String valueOrDash(String s) {
+        return s == null || s.trim().isEmpty() ? "-" : s.trim();
+    }
+
+    private void copyCoding(ScanResult r) {
+        if (r == null || r.coding0600 == null || r.coding0600.trim().isEmpty()) {
+            toast("Coding nao disponivel");
+            return;
+        }
+        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        if (cm != null) {
+            cm.setPrimaryClip(ClipData.newPlainText("ScanVAG Coding " + r.module.address, r.coding0600));
+            toast("Coding copiado");
+        }
+    }
+
+    private void saveModuleBackup(ScanResult r) {
+        try {
+            String text = ReportManager.buildModuleText(vin, elmInfo, protocol, r);
+            File f = ReportManager.saveModuleText(this, vin, r, text);
+            append("\nBackup do modulo " + r.module.address + " salvo em:\n" + f.getAbsolutePath() + "\n");
+            toast("Backup do modulo salvo");
+        } catch (Exception e) {
+            toast("Erro no backup: " + e.getMessage());
+        }
     }
 
     private void postModule(ScanResult r) {
@@ -428,13 +659,13 @@ public class MainActivity extends Activity {
     private void saveBackup() {
         refreshReport();
         if (results.isEmpty()) {
-            toast("Faça o Scan VAG primeiro");
+            toast("Faca o Scan VAG primeiro");
             return;
         }
         try {
             File f = ReportManager.saveText(this, vin, lastReport);
-            append("\nBackup salvo em:\n" + f.getAbsolutePath() + "\n");
-            toast("Backup salvo");
+            append("\nBackup geral salvo em:\n" + f.getAbsolutePath() + "\n");
+            toast("Backup geral salvo");
         } catch (Exception e) {
             toast("Erro no backup: " + e.getMessage());
         }
@@ -443,14 +674,14 @@ public class MainActivity extends Activity {
     private void shareReport() {
         refreshReport();
         if (results.isEmpty()) {
-            toast("Faça o Scan VAG primeiro");
+            toast("Faca o Scan VAG primeiro");
             return;
         }
         Intent send = new Intent(Intent.ACTION_SEND);
         send.setType("text/plain");
-        send.putExtra(Intent.EXTRA_SUBJECT, "ScanVAG " + (vin.isEmpty() ? "Relatório" : vin));
+        send.putExtra(Intent.EXTRA_SUBJECT, "ScanVAG " + (vin.isEmpty() ? "Relatorio" : vin));
         send.putExtra(Intent.EXTRA_TEXT, lastReport);
-        startActivity(Intent.createChooser(send, "Compartilhar relatório ScanVAG"));
+        startActivity(Intent.createChooser(send, "Compartilhar relatorio ScanVAG"));
     }
 
     private void refreshReport() {
@@ -482,7 +713,7 @@ public class MainActivity extends Activity {
 
     private void setConnectedUi(boolean connected) {
         scanButton.setEnabled(connected);
-        dtcButton.setEnabled(connected);
+        dtcButton.setEnabled(connected && !results.isEmpty());
         disconnectButton.setEnabled(connected);
         backupButton.setEnabled(!results.isEmpty());
         shareButton.setEnabled(!results.isEmpty());
@@ -505,11 +736,9 @@ public class MainActivity extends Activity {
 
     private void setStatus(String text) { statusText.setText("Status: " + text); }
     private void postStatus(String text) { main.post(() -> setStatus(text)); }
-    private void append(String text) {
-        outputText.append(text);
-        scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN));
-    }
+    private void append(String text) { outputText.append(text); }
     private void postAppend(String text) { main.post(() -> append(text)); }
+    private void appendFromWorker(String text) { main.post(() -> append(text)); }
     private void toast(String text) { Toast.makeText(this, text, Toast.LENGTH_SHORT).show(); }
 
     @Override

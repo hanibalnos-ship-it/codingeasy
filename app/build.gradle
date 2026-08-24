@@ -10,8 +10,8 @@ android {
         applicationId 'br.com.scanvag'
         minSdk 23
         targetSdk 33
-        versionCode 100
-        versionName '1.0.0-readonly'
+        versionCode 110
+        versionName '1.1.0-readonly'
     }
 
     buildTypes {
