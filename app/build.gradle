@@ -11,7 +11,7 @@ android {
         minSdk 23
         targetSdk 33
         versionCode 120
-        versionName '1.2.0-coding-beta'
+        versionName '1.2'
     }
 
     buildTypes {
