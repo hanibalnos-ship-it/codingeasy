@@ -34,8 +34,19 @@ jobs:
           chmod +x ./gradlew
           ./gradlew --no-daemon assembleDebug
 
+      - name: Ler versao do app
+        id: version
+        run: |
+          VERSION=$(grep "versionName" app/build.gradle | head -1 | sed "s/.*versionName ['\"]//" | sed "s/['\"].*//")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Versao encontrada: $VERSION"
+
+      - name: Renomear APK
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk "ScanVAG-v${{ steps.version.outputs.version }}.apk"
+
       - name: Enviar APK
         uses: actions/upload-artifact@v4
         with:
-          name: ScanVAG-v${{ steps.version.outputs.version }}-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: ScanVAG-v${{ steps.version.outputs.version }}-APK
+          path: ScanVAG-v${{ steps.version.outputs.version }}.apk
