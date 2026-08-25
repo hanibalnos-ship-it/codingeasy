@@ -30,22 +30,10 @@ public final class IsoTpParser {
 
         if (frames.isEmpty()) return null;
 
-        // Prefer a complete single-frame response when present.
-        for (byte[] frame : frames) {
-            if (frame.length < 1) continue;
-            int pci = frame[0] & 0xFF;
-            int type = (pci >> 4) & 0x0F;
-            if (type == 0x0) {
-                int len = pci & 0x0F;
-                if (len > 0 && frame.length >= 1 + len) {
-                    byte[] out = new byte[len];
-                    System.arraycopy(frame, 1, out, 0, len);
-                    return out;
-                }
-            }
-        }
-
-        // ISO-TP multi-frame: first frame + consecutive frames.
+        // Primeiro procure uma resposta ISO-TP multi-frame completa. Isso é importante
+        // quando o mesmo request recebeu antes um NRC 0x78 (Response Pending) e depois
+        // a ECU entregou a resposta positiva em vários frames.
+        byte[] lastMulti = null;
         for (int start = 0; start < frames.size(); start++) {
             byte[] frame = frames.get(start);
             if (frame.length < 2) continue;
@@ -72,10 +60,32 @@ public final class IsoTpParser {
             if (assembled.length >= totalLen) {
                 byte[] exact = new byte[totalLen];
                 System.arraycopy(assembled, 0, exact, 0, totalLen);
-                return exact;
+                // Prefira uma resposta definitiva; um 0x78 nunca deve esconder a final.
+                if (!isResponsePending(exact)) lastMulti = exact;
             }
         }
-        return null;
+        if (lastMulti != null) return lastMulti;
+
+        // Para single-frame, varra de trás para frente e prefira a resposta definitiva
+        // mais recente. Só devolva o NRC 0x78 se realmente não existir resposta final.
+        byte[] pending = null;
+        for (int i = frames.size() - 1; i >= 0; i--) {
+            byte[] frame = frames.get(i);
+            if (frame.length < 1) continue;
+            int pci = frame[0] & 0xFF;
+            int type = (pci >> 4) & 0x0F;
+            if (type != 0x0) continue;
+            int len = pci & 0x0F;
+            if (len <= 0 || frame.length < 1 + len) continue;
+            byte[] out = new byte[len];
+            System.arraycopy(frame, 1, out, 0, len);
+            if (isResponsePending(out)) {
+                if (pending == null) pending = out;
+                continue;
+            }
+            return out;
+        }
+        return pending;
     }
 
     public static boolean isResponsePending(byte[] payload) {

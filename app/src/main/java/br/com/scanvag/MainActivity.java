@@ -89,7 +89,7 @@ public class MainActivity extends Activity {
                 ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
 
         TextView title = new TextView(this);
-        title.setText("ScanVAG v1.2");
+        title.setText("ScanVAG v1.2.1");
         title.setTextSize(27);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         root.addView(title, fullWidth());
@@ -337,6 +337,8 @@ public class MainActivity extends Activity {
                 elm.command("ATSP0", 2500);
                 elm.command("ATCAF1", 1000);
                 elm.command("ATCFC1", 1000);
+                elm.command("ATAT1", 1000);
+                elm.command("ATSTFF", 1000);
                 elm.command("ATFCSD300000", 1000);
                 elm.command("ATFCSM1", 1000);
 
@@ -384,7 +386,7 @@ public class MainActivity extends Activity {
         progress.setMax(modules.length);
         progress.setProgress(0);
         results.clear();
-        outputText.setText("=== SCAN VAG v1.2 / READ + CODING BETA ===\n");
+        outputText.setText("=== SCAN VAG v1.2.1 / READ + CODING BETA ===\n");
         renderModuleCards();
 
         worker.execute(() -> {
@@ -438,29 +440,20 @@ public class MainActivity extends Activity {
     }
 
     private byte[] readPayloadWithPending(String command, VagModule module, long totalTimeoutMs) {
-        long deadline = android.os.SystemClock.elapsedRealtime() + totalTimeoutMs;
-        byte[] last = null;
-        int pendingCount = 0;
-        while (android.os.SystemClock.elapsedRealtime() < deadline) {
-            try {
-                String raw = elm.command(command, 2200);
-                byte[] payload = IsoTpParser.extractPayload(raw, module.rxId);
-                if (payload == null) {
-                    android.os.SystemClock.sleep(120);
-                    continue;
-                }
-                last = payload;
-                if (!IsoTpParser.isResponsePending(payload)) return payload;
-
-                pendingCount++;
-                appendFromWorker("[" + module.address + "] UDS 0x78 Response Pending (" + pendingCount + ")...\n");
-                postStatus("[" + module.address + "] ECU processando resposta...");
-                android.os.SystemClock.sleep(Math.min(650, 180 + pendingCount * 90L));
-            } catch (Exception e) {
-                android.os.SystemClock.sleep(120);
+        try {
+            // Envia o request UMA única vez. Se a ECU responder 7F xx 78, o Elm327Client
+            // permanece ouvindo a resposta definitiva sem reenviar o serviço UDS.
+            String raw = elm.command(command, totalTimeoutMs);
+            byte[] payload = IsoTpParser.extractPayload(raw, module.rxId);
+            if (IsoTpParser.isResponsePending(payload)) {
+                appendFromWorker("[" + module.address + "] UDS 0x78: timeout aguardando resposta definitiva.\n");
+                postStatus("[" + module.address + "] resposta ainda pendente");
             }
+            return payload;
+        } catch (Exception e) {
+            appendFromWorker("[" + module.address + "] " + command + ": " + e.getMessage() + "\n");
+            return null;
         }
-        return last;
     }
 
     private void startDtcScan() {

@@ -1,0 +1,17 @@
+ScanVAG v1.2.1 - PATCH
+
+Correcoes:
+- UDS NRC 0x78 Response Pending: o request nao e mais reenviado repetidamente.
+- O cliente permanece ouvindo a resposta final do mesmo request ate o timeout total.
+- Parser ISO-TP prefere a resposta definitiva mais recente e nao deixa um 0x78 esconder a resposta final.
+- ATAT1 + ATSTFF habilitados para ECUs mais lentas.
+- Correcao do contador da leitura de DTC.
+- VersionCode 121 / versionName 1.2.1.
+- Artefato: ScanVAG-v1.2.1-debug-apk.
+
+TESTE RECOMENDADO:
+1. Conectar no ELM conhecido.
+2. Fazer SCAN VAG.
+3. Abrir 03 ABS e verificar F191/F187.
+4. Abrir log tecnico e conferir se nao ha repeticao de 8 requests 0x78.
+5. Nao gravar Coding BETA ainda; validar leitura primeiro.

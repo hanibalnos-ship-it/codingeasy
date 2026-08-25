@@ -85,6 +85,8 @@ public final class Elm327Client {
 
         long deadline = SystemClock.elapsedRealtime() + timeoutMs;
         StringBuilder response = new StringBuilder();
+        boolean pendingSeen = false;
+
         while (SystemClock.elapsedRealtime() < deadline) {
             int available = input.available();
             if (available > 0) {
@@ -93,15 +95,69 @@ public final class Elm327Client {
                 if (n > 0) {
                     String chunk = new String(buffer, 0, n, StandardCharsets.US_ASCII);
                     response.append(chunk);
-                    if (response.indexOf(">") >= 0) break;
+
+                    // Alguns módulos (ex.: ABS MQB) devolvem UDS NRC 0x78 e só depois
+                    // enviam a resposta definitiva. Não reenviamos o request: permanecemos
+                    // ouvindo o mesmo socket até a resposta final ou até o timeout total.
+                    if (chunk.indexOf('>') >= 0) {
+                        String all = response.toString();
+                        if (containsResponsePending(all, cmd) && !containsFinalResponse(all, cmd)) {
+                            pendingSeen = true;
+                            continue;
+                        }
+                        break;
+                    }
+
+                    // Depois de um 0x78 o ELM pode entregar a resposta final sem novo prompt
+                    // imediatamente. Se já identificamos uma resposta definitiva, encerramos.
+                    if (pendingSeen && containsFinalResponse(response.toString(), cmd)) break;
                 }
             } else {
-                SystemClock.sleep(18);
+                SystemClock.sleep(pendingSeen ? 25 : 18);
             }
         }
 
         if (response.length() == 0) throw new IOException("Timeout no comando " + cmd);
         return response.toString().replace(">", "").trim();
+    }
+
+    private boolean containsResponsePending(String raw, String cmd) {
+        if (cmd == null || cmd.length() < 2) return false;
+        String hex = raw == null ? "" : raw.toUpperCase(Locale.US).replaceAll("[^0-9A-F]", "");
+        String service = cmd.substring(0, 2);
+        return hex.contains("7F" + service + "78");
+    }
+
+    private boolean containsFinalResponse(String raw, String cmd) {
+        if (cmd == null || cmd.length() < 2) return false;
+        String hex = raw == null ? "" : raw.toUpperCase(Locale.US).replaceAll("[^0-9A-F]", "");
+        String service = cmd.substring(0, 2);
+        String positive;
+        switch (service) {
+            case "10": positive = "50"; break;
+            case "19": positive = "59"; break;
+            case "22": positive = "62"; break;
+            case "2E": positive = "6E"; break;
+            case "3E": positive = "7E"; break;
+            default: positive = ""; break;
+        }
+
+        if (!positive.isEmpty()) {
+            if ("22".equals(service) && cmd.length() >= 6) {
+                if (hex.contains(positive + cmd.substring(2, 6))) return true;
+            } else if (hex.contains(positive)) {
+                return true;
+            }
+        }
+
+        // Qualquer negativa definitiva (NRC diferente de 0x78) encerra a espera.
+        String marker = "7F" + service;
+        int pos = hex.lastIndexOf(marker);
+        if (pos >= 0 && pos + marker.length() + 2 <= hex.length()) {
+            String nrc = hex.substring(pos + marker.length(), pos + marker.length() + 2);
+            return !"78".equals(nrc);
+        }
+        return false;
     }
 
     private String normalize(String command) {
