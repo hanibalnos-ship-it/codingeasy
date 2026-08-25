@@ -89,7 +89,7 @@ public class MainActivity extends Activity {
                 ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
 
         TextView title = new TextView(this);
-        title.setText("ScanVAG v1.2.1");
+        title.setText("ScanVAG v1.2.2");
         title.setTextSize(27);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         root.addView(title, fullWidth());
@@ -386,7 +386,7 @@ public class MainActivity extends Activity {
         progress.setMax(modules.length);
         progress.setProgress(0);
         results.clear();
-        outputText.setText("=== SCAN VAG v1.2.1 / READ + CODING BETA ===\n");
+        outputText.setText("=== SCAN VAG v1.2.2 / READ + CODING BETA ===\n");
         renderModuleCards();
 
         worker.execute(() -> {
@@ -680,10 +680,10 @@ public class MainActivity extends Activity {
                         return;
                     }
                     if (candidate.equals(original)) {
-                        toast("Coding nao foi alterado");
+                        prepareCodingWrite(r, original, candidate, true);
                         return;
                     }
-                    prepareCodingWrite(r, original, candidate);
+                    prepareCodingWrite(r, original, candidate, false);
                 })
                 .show();
     }
@@ -697,9 +697,9 @@ public class MainActivity extends Activity {
         return hex;
     }
 
-    private void prepareCodingWrite(ScanResult r, String originalFromScreen, String candidate) {
+    private void prepareCodingWrite(ScanResult r, String originalFromScreen, String candidate, boolean identicalValidation) {
         setBusy(true);
-        setStatus("Preparando Coding BETA...");
+        setStatus(identicalValidation ? "Preparando validacao de escrita..." : "Preparando Coding BETA...");
         worker.execute(() -> {
             try {
                 selectModule(r.module);
@@ -724,7 +724,7 @@ public class MainActivity extends Activity {
                 final String backupPath = backup.getAbsolutePath();
                 main.post(() -> {
                     setBusy(false);
-                    showFinalCodingConfirmation(r, freshFinal, candidate, voltageFinal, backupPath);
+                    showFinalCodingConfirmation(r, freshFinal, candidate, voltageFinal, backupPath, identicalValidation);
                 });
             } catch (Exception e) {
                 main.post(() -> {
@@ -745,55 +745,64 @@ public class MainActivity extends Activity {
     }
 
     private void showFinalCodingConfirmation(ScanResult r, String original, String candidate,
-                                             double voltage, String backupPath) {
+                                             double voltage, String backupPath, boolean identicalValidation) {
         final EditText confirm = new EditText(this);
-        confirm.setHint("Digite GRAVAR");
+        final String confirmationWord = identicalValidation ? "TESTAR" : "GRAVAR";
+        confirm.setHint("Digite " + confirmationWord);
         confirm.setSingleLine(true);
 
-        String message = "BACKUP SALVO:\n" + backupPath
+        String modeText = identicalValidation
+                ? "VALIDACAO DE ESCRITA IDENTICA: o app enviara o MESMO Coding 0600 que ja esta no 5F. Nenhum byte de configuracao sera alterado."
+                : "CODING BETA: o valor abaixo e diferente do original e pode alterar configuracoes do 5F.";
+
+        String message = modeText
+                + "\n\nBACKUP SALVO:\n" + backupPath
                 + "\n\nTensao: " + String.format(Locale.US, "%.2f V", voltage)
                 + "\n\nORIGINAL:\n" + original
-                + "\n\nNOVO:\n" + candidate
-                + "\n\nEsta versao grava somente o DID 0600 do modulo 5F."
-                + "\nDigite GRAVAR para confirmar.";
+                + "\n\nVALOR A ENVIAR:\n" + candidate
+                + "\n\nA v1.2.2 grava somente o DID 0600 do modulo 5F e relera o DID apos a resposta da ECU."
+                + "\nDigite " + confirmationWord + " para confirmar.";
 
         new AlertDialog.Builder(this)
-                .setTitle("Confirmacao final — CODING BETA")
+                .setTitle(identicalValidation ? "Validar escrita 5F — SEM ALTERAR" : "Confirmacao final — CODING BETA")
                 .setMessage(message)
                 .setView(confirm)
                 .setNegativeButton("Cancelar", null)
-                .setPositiveButton("Gravar", (d, which) -> {
-                    if (!"GRAVAR".equalsIgnoreCase(confirm.getText().toString().trim())) {
+                .setPositiveButton(identicalValidation ? "Testar" : "Gravar", (d, which) -> {
+                    if (!confirmationWord.equalsIgnoreCase(confirm.getText().toString().trim())) {
                         showSimpleError("Confirmacao incorreta", "Nada foi enviado ao modulo.");
                         return;
                     }
-                    performCodingWrite(r, original, candidate);
+                    performCodingWrite(r, original, candidate, identicalValidation);
                 })
                 .show();
     }
 
-    private void performCodingWrite(ScanResult r, String original, String candidate) {
+    private void performCodingWrite(ScanResult r, String original, String candidate, boolean identicalValidation) {
         if (!r.module.codingWriteAllowed || !"5F".equals(r.module.address)) {
             toast("Escrita bloqueada neste modulo");
             return;
         }
         setBusy(true);
-        setStatus("Gravando Coding 0600 no 5F...");
-        append("\n=== CODING BETA 5F ===\nOriginal: " + original + "\nNovo: " + candidate + "\n");
+        setStatus(identicalValidation ? "Validando escrita identica no 5F..." : "Gravando Coding 0600 no 5F...");
+        append("\n=== " + (identicalValidation ? "WRITE VALIDATION 5F" : "CODING BETA 5F") + " ===\nOriginal: " + original + "\nValor enviado: " + candidate + "\n");
 
         worker.execute(() -> {
             try {
                 selectModule(r.module);
                 elm.command("ATAL", 1000); // permite mensagens ISO-TP longas em adaptadores compativeis
 
-                byte[] session = IsoTpParser.extractPayload(elm.codingCommand("1003", 2500), r.module.rxId);
+                String sessionRaw = elm.codingCommand("1003", 3500);
+                appendFromWorker("UDS 1003 RX bruto: " + clean(sessionRaw) + "\n");
+                byte[] session = IsoTpParser.extractPayload(sessionRaw, r.module.rxId);
                 if (IsoTpParser.isResponsePending(session)) {
                     android.os.SystemClock.sleep(650);
                 } else if (!IsoTpParser.isPositiveSession(session, 0x03)) {
                     throw new Exception("Sessao diagnostica recusada: " + IsoTpParser.describe(session));
                 }
 
-                String writeRaw = elm.codingCommand("2E0600" + candidate, 4500);
+                String writeRaw = elm.codingCommand("2E0600" + candidate, 8000);
+                appendFromWorker("UDS 2E0600 RX bruto: " + clean(writeRaw) + "\n");
                 byte[] writePayload = IsoTpParser.extractPayload(writeRaw, r.module.rxId);
                 boolean pending = IsoTpParser.isResponsePending(writePayload);
                 if (!pending && !IsoTpParser.isPositiveWriteDid(writePayload, 0x0600)) {
@@ -814,12 +823,15 @@ public class MainActivity extends Activity {
                 refreshReport();
                 main.post(() -> {
                     setBusy(false);
-                    setStatus("Coding 5F gravado e verificado");
+                    setStatus(identicalValidation ? "Validacao de escrita 5F concluida" : "Coding 5F gravado e verificado");
                     renderModuleCards();
-                    append("Resultado: OK — releitura identica ao novo coding.\n=== FIM CODING ===\n");
+                    append("Resultado: OK — ECU confirmou 2E0600 e a releitura ficou identica.\n=== FIM CODING ===\n");
                     new AlertDialog.Builder(this)
-                            .setTitle("Coding concluido")
-                            .setMessage("O modulo 5F confirmou o Coding 0600 e a releitura ficou identica ao valor gravado.\n\nNovo coding:\n" + r.coding0600)
+                            .setTitle(identicalValidation ? "Escrita validada" : "Coding concluido")
+                            .setMessage((identicalValidation
+                                    ? "O modulo 5F aceitou a reescrita do mesmo Coding 0600. Nenhum byte foi alterado e a releitura conferiu 100%."
+                                    : "O modulo 5F confirmou o Coding 0600 e a releitura ficou identica ao valor gravado.")
+                                    + "\n\nCoding verificado:\n" + r.coding0600)
                             .setPositiveButton("OK", null)
                             .show();
                 });
@@ -829,7 +841,7 @@ public class MainActivity extends Activity {
                     setStatus("Coding nao concluido");
                     append("ERRO CODING: " + e.getMessage() + "\n=== FIM CODING ===\n");
                     showSimpleError("Coding nao concluido", e.getMessage()
-                            + "\n\nNenhum bypass de Security Access e feito pela v1.2.");
+                            + "\n\nNenhum bypass de Security Access e feito pela v1.2.2.");
                 });
             }
         });

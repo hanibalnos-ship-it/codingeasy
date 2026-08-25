@@ -1,0 +1,10 @@
+ScanVAG v1.2.2 — Write Validation
+
+Mudancas:
+- permite validar a escrita do 5F regravando exatamente o mesmo Coding 0600;
+- backup e tensao continuam obrigatorios;
+- confirmacao especial digitando TESTAR quando o valor e identico;
+- registra no log a resposta bruta de 1003 e 2E0600;
+- releitura 220600 obrigatoria e comparacao byte a byte;
+- escrita continua bloqueada nos demais modulos;
+- nenhum bypass de Security Access.
